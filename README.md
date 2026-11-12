@@ -6,6 +6,10 @@ is deployed, and the only credential used is the automatic `GITHUB_TOKEN`.
 
 ## Flow
 
+Every push to `main` is deployed to qa by `qa_flow.yaml` (simulated).
+
+Release Flow:
+
 `compute_version` -> `validate_release` -> `deploy_stg` -> `get_last_tag`
 (pushes `vX.Y.Z-rc.N`) -> `generate_pre_release` -> `promote_prd` ->
 `deploy_prd` -> `generate_release` (pushes `vX.Y.Z` and the stable release).
