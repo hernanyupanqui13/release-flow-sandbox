@@ -94,3 +94,63 @@ jobs:
     with:
       environment: prd
       releaseCandidateVersion: ${{ needs.compute_version.outputs.version }}
+
+  # Linear Releases (scheduled pipeline). The release is named vX.Y.Z without
+  # -rc.N so retried candidates update the same release, and every sync scans
+  # from the latest stable tag so a version change keeps earlier commits.
+  # Linear failures never block the deploy.
+  linear_stg:
+    needs: [compute_version, deploy_stg]
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - id: release
+        env:
+          RC: ${{ needs.compute_version.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "version=${RC%%-rc.*}" >> "$GITHUB_OUTPUT"
+          echo "base=$(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)" >> "$GITHUB_OUTPUT"
+      - name: Sync issues into the release
+        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          version: ${{ steps.release.outputs.version }}
+          name: ${{ steps.release.outputs.version }}
+          base_ref: ${{ steps.release.outputs.base }}
+      - name: Move the release to the stg stage
+        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: update
+          stage: stg
+          version: ${{ steps.release.outputs.version }}
+
+  linear_prd:
+    needs: [compute_version, deploy_prd]
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: release
+        env:
+          RC: ${{ needs.compute_version.outputs.version }}
+        run: echo "version=${RC%%-rc.*}" >> "$GITHUB_OUTPUT"
+      - name: Complete the release
+        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: complete
+          version: ${{ steps.release.outputs.version }}
