@@ -1,0 +1,17 @@
+---
+# Sandbox copy of the qa flow: every push to main is deployed to qa (simulated).
+name: QA Flow
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy_qa:
+    uses: ./.github/workflows/stub_deploy.yaml
+    with:
+      environment: qa
+      version: ${{ github.sha }}
