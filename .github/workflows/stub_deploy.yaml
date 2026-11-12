@@ -1,0 +1,31 @@
+---
+# Stub: simulates a deploy. Nothing is deployed.
+name: Stub Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      fail:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          TARGET: ${{ inputs.environment }}
+          VERSION: ${{ inputs.version }}
+          FAIL: ${{ inputs.fail }}
+        run: |
+          if [[ "$FAIL" == "true" ]]; then
+            echo "Simulated deploy failure of $VERSION in $TARGET"; exit 1
+          fi
+          echo "Simulated deploy of $VERSION to $TARGET"

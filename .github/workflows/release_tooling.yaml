@@ -1,0 +1,28 @@
+---
+name: Release Tooling
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - cliff.toml
+      - .github/scripts/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release_version_test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - run: shellcheck .github/scripts/*.sh
+      - env:
+          GIT_CLIFF: npx --yes git-cliff@2.14.2
+        run: bash .github/scripts/release-version_test.sh

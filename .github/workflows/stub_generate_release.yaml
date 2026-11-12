@@ -1,0 +1,44 @@
+---
+# Stub: stg creates a pre-release for the rc tag; prd pushes the final vX.Y.Z
+# tag and creates the stable GitHub Release.
+name: Stub Generate Release
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+      releaseCandidateVersion:
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ inputs.environment }}
+          RC: ${{ inputs.releaseCandidateVersion }}
+        run: |
+          set -euo pipefail
+          previous="$(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          range="${previous:+${previous}..}HEAD"
+          { echo "Changes since ${previous:-the first commit}:"; git log --format='- %s (%h)' "$range"; } > notes.md
+          if [[ "$TARGET" == "stg" ]]; then
+            gh release create "$RC" --prerelease --verify-tag --title "$RC" --notes-file notes.md
+            exit 0
+          fi
+          final="${RC%%-rc.*}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$final" -m "$final" "$GITHUB_SHA"
+          git push origin "refs/tags/$final"
+          gh release create "$final" --latest --verify-tag --title "Release $final" --notes-file notes.md

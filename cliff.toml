@@ -1,0 +1,16 @@
+# git-cliff configuration used by the Release Flow to compute the next version.
+# Sandbox copy of the release versioning configuration.
+
+[git]
+conventional_commits = true
+# Unconventional commits still count as a patch-level change.
+filter_unconventional = false
+# Only stable tags (released to prd) are the bump base; -rc.N tags are ignored.
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+
+[bump]
+# feat bumps the minor version even while the major version is 0.
+features_always_bump_minor = true
+# Breaking changes bump the minor version while the major version is 0;
+# reaching v1.0.0 is a deliberate decision made through the manual override.
+breaking_always_bump_major = false

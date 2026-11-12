@@ -1,0 +1,24 @@
+---
+# Stub: simulates the manual prd promotion. Personal private repositories
+# cannot require environment reviewers, so rejection is an input.
+name: Stub Approve
+
+on:
+  workflow_call:
+    inputs:
+      reject:
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  approve:
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          REJECT: ${{ inputs.reject }}
+        run: |
+          if [[ "$REJECT" == "true" ]]; then
+            echo "Simulated rejection: QA found a bug in stg"; exit 1
+          fi
+          echo "Simulated prd promotion approval"

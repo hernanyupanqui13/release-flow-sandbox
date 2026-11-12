@@ -1,0 +1,96 @@
+---
+# Sandbox copy of the Release Flow: the same job order with stub reusable
+# workflows that only create tags and GitHub Releases. Nothing is deployed.
+name: Release Flow
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseCandidateVersion:
+        description: "Optional override (vX.Y.Z-rc.N). Leave empty to compute it."
+        required: false
+        default: ""
+      simulate_failure:
+        description: "Stage that should fail"
+        type: choice
+        default: none
+        options: [none, stg_deploy, qa_rejected, prd_deploy]
+
+run-name: Release Flow (simulate_failure=${{ inputs.simulate_failure }})
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-flow
+  cancel-in-progress: false
+
+jobs:
+  compute_version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - id: version
+        env:
+          GIT_CLIFF: npx --yes git-cliff@2.14.2
+          OVERRIDE: ${{ inputs.releaseCandidateVersion }}
+        run: |
+          version="$(bash .github/scripts/release-version.sh "$OVERRIDE")"
+          echo "### Release version: \`${version}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  validate_release:
+    needs: [compute_version]
+    uses: ./.github/workflows/stub_validate_release.yaml
+    with:
+      version: ${{ needs.compute_version.outputs.version }}
+
+  deploy_stg:
+    needs: [compute_version, validate_release]
+    uses: ./.github/workflows/stub_deploy.yaml
+    with:
+      environment: stg
+      version: ${{ needs.compute_version.outputs.version }}
+      fail: ${{ inputs.simulate_failure == 'stg_deploy' }}
+
+  get_last_tag:
+    needs: [compute_version, deploy_stg]
+    uses: ./.github/workflows/stub_last_tag.yaml
+    with:
+      tag: ${{ needs.compute_version.outputs.version }}
+
+  generate_pre_release:
+    needs: [compute_version, get_last_tag]
+    uses: ./.github/workflows/stub_generate_release.yaml
+    with:
+      environment: stg
+      releaseCandidateVersion: ${{ needs.compute_version.outputs.version }}
+
+  promote_prd:
+    needs: [generate_pre_release]
+    uses: ./.github/workflows/stub_approve.yaml
+    with:
+      reject: ${{ inputs.simulate_failure == 'qa_rejected' }}
+
+  deploy_prd:
+    needs: [compute_version, promote_prd]
+    uses: ./.github/workflows/stub_deploy.yaml
+    with:
+      environment: prd
+      version: ${{ needs.compute_version.outputs.version }}
+      fail: ${{ inputs.simulate_failure == 'prd_deploy' }}
+
+  generate_release:
+    needs: [compute_version, deploy_prd]
+    uses: ./.github/workflows/stub_generate_release.yaml
+    with:
+      environment: prd
+      releaseCandidateVersion: ${{ needs.compute_version.outputs.version }}

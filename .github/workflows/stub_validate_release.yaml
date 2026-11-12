@@ -1,0 +1,30 @@
+---
+# Stub: validates the vX.Y.Z-rc.N format and rejects a vX.Y.Z that is already
+# the latest stable release.
+name: Stub Validate Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "Invalid release version $VERSION"; exit 1
+          fi
+          base="${VERSION%%-rc.*}"
+          latest="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName // ""')"
+          if [[ "$latest" == "$base" ]]; then
+            echo "Release version $base already exists; bump the version"; exit 1
+          fi
+          echo "Release version $VERSION is valid (latest stable: ${latest:-none})"
