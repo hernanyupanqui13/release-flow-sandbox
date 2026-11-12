@@ -125,6 +125,8 @@ jobs:
           version: ${{ steps.release.outputs.version }}
           name: ${{ steps.release.outputs.version }}
           base_ref: ${{ steps.release.outputs.base }}
+          # Commit subjects reference issues as "[ABC-123]".
+          issue_pattern: '\[([A-Z]+-\d+)\]'
       - name: Move the release to the stg stage
         uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
         with:
