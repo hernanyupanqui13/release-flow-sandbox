@@ -145,14 +145,35 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
       - id: release
         env:
           RC: ${{ needs.compute_version.outputs.version }}
-        run: echo "version=${RC%%-rc.*}" >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          version="${RC%%-rc.*}"
+          # generate_release may already have pushed the final tag, so exclude it.
+          previous="$(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$version" | head -n 1)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+      - name: Generate release notes
+        env:
+          PREVIOUS: ${{ steps.release.outputs.previous }}
+        run: |
+          set -euo pipefail
+          npx --yes git-cliff@2.14.2 --config cliff.toml "${PREVIOUS}..HEAD" --strip all > release-notes.md
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "Sin cambios visibles para usuarios en esta versión." > release-notes.md
+          fi
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
       - name: Complete the release
         uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
         with:
           access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
           command: complete
           version: ${{ steps.release.outputs.version }}
+          release_notes: release-notes.md

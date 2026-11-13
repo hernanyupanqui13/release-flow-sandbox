@@ -7,6 +7,13 @@ conventional_commits = true
 filter_unconventional = false
 # Only stable tags (released to prd) are the bump base; -rc.N tags are ignored.
 tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+commit_parsers = [
+  { field = "breaking", pattern = "true", group = "<!-- 0 -->Cambios importantes" },
+  { message = "^feat", group = "<!-- 1 -->Nuevas funcionalidades" },
+  { message = "^(perf|refactor)", group = "<!-- 2 -->Mejoras" },
+  { message = "^fix", group = "<!-- 3 -->Correcciones" },
+  { message = ".*", group = "<!-- 9 -->internal" },
+]
 
 [bump]
 # feat bumps the minor version even while the major version is 0.
@@ -14,3 +21,24 @@ features_always_bump_minor = true
 # Breaking changes bump the minor version while the major version is 0;
 # reaching v1.0.0 is a deliberate decision made through the manual override.
 breaking_always_bump_major = false
+
+# Release notes sent to Linear when a release is completed in prd.
+# Internal commits stay in the "internal" group (so they still count for the
+# version bump) and are hidden by the template.
+[changelog]
+trim = true
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}\
+{% if group is not containing("internal") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}\
+- {{ commit.message | split(pat="\n") | first | upper_first }}
+{% endfor %}\
+{% endif %}\
+{% endfor %}
+"""
+postprocessors = [
+  { pattern = '\[([A-Z]+-[0-9]+)\]', replace = "([$1](https://linear.app/hernanyupanqui/issue/$1))" },
+  { pattern = '\(#([0-9]+)\)', replace = "([#$1](https://github.com/hernanyupanqui13/release-flow-sandbox/pull/$1))" },
+]
+
