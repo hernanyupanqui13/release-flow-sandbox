@@ -15,7 +15,8 @@ Release Flow:
 `deploy_prd` -> `generate_release` (pushes `vX.Y.Z` and the stable release).
 
 Run it with `gh workflow run release.yaml -f simulate_failure=<stage>`, where
-the stage is `none`, `stg_deploy`, `qa_rejected` or `prd_deploy`.
+the stage is `none`, `stg_deploy` or `prd_deploy`. `promote_prd` pauses until a
+reviewer of the `promotePRD` environment approves or rejects the prd promotion.
 
 ## Version rules
 

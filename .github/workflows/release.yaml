@@ -14,7 +14,7 @@ on:
         description: "Stage that should fail"
         type: choice
         default: none
-        options: [none, stg_deploy, qa_rejected, prd_deploy]
+        options: [none, stg_deploy, prd_deploy]
 
 run-name: Release Flow (simulate_failure=${{ inputs.simulate_failure }})
 
@@ -78,7 +78,7 @@ jobs:
     needs: [generate_pre_release]
     uses: ./.github/workflows/stub_approve.yaml
     with:
-      reject: ${{ inputs.simulate_failure == 'qa_rejected' }}
+      environment: promotePRD
 
   deploy_prd:
     needs: [compute_version, promote_prd]
