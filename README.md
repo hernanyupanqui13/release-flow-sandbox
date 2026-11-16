@@ -14,7 +14,11 @@ Release Flow:
 (pushes `vX.Y.Z-rc.N`) -> `generate_pre_release` -> `promote_prd` ->
 `deploy_prd` -> `generate_release` (pushes `vX.Y.Z` and the stable release).
 
-Run it with `gh workflow run release.yaml -f simulate_failure=<stage>`, where
+Start a release with `gh workflow run start_release.yaml` on main: it creates a
+`release/<version>` branch and runs the Release Flow on it, because the stg, prd
+and promotePRD environments only accept release/** branches. Each retry gets a
+new branch (`release/vX.Y.Z-rc.N+1`). The Release Flow can also be run directly
+with `gh workflow run release.yaml --ref release/<branch> -f simulate_failure=<stage>`, where
 the stage is `none`, `stg_deploy` or `prd_deploy`. `promote_prd` pauses until a
 reviewer of the `promotePRD` environment approves or rejects the prd promotion.
 

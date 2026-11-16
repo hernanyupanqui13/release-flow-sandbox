@@ -1,0 +1,19 @@
+---
+# Stand-in for the organization's required status check. It runs on pull
+# requests and on pushes to main and release/** so every commit that can seed a
+# release branch carries the "checks" status.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, "release/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "required checks passed"
