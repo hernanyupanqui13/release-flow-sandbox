@@ -1,0 +1,69 @@
+---
+# Starts a release from main: computes the next version, creates a
+# release/<version> branch at the current main commit and dispatches the
+# Release Flow on it. Each attempt gets its own branch because release/**
+# branches only accept changes through pull requests and cannot be deleted.
+name: Start Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseCandidateVersion:
+        description: "Optional override (vX.Y.Z-rc.N). Leave empty to compute it."
+        required: false
+        default: ""
+      simulate_failure:
+        description: "Stage that should fail"
+        type: choice
+        default: none
+        options: [none, stg_deploy, prd_deploy]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release-flow
+  cancel-in-progress: false
+
+jobs:
+  start:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Start Release must run on main; current ref is $GITHUB_REF"
+          exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+      - id: version
+        env:
+          GIT_CLIFF: npx --yes git-cliff@2.14.2
+          OVERRIDE: ${{ inputs.releaseCandidateVersion }}
+        run: bash .github/scripts/release-version.sh "$OVERRIDE"
+      - name: Create the release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          branch="release/${VERSION}"
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/heads/${branch}" -f sha="${GITHUB_SHA}" >/dev/null
+          echo "branch=${branch}" >> "$GITHUB_ENV"
+          echo "### Release branch: \`${branch}\` at \`${GITHUB_SHA::7}\`" >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch the Release Flow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SIMULATE: ${{ inputs.simulate_failure }}
+        run: |
+          gh workflow run release.yaml --repo "$GITHUB_REPOSITORY" --ref "$branch" \
+            -f releaseCandidateVersion="$VERSION" -f simulate_failure="$SIMULATE"

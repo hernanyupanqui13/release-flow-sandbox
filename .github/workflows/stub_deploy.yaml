@@ -19,6 +19,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
+    environment: ${{ inputs.environment }}
     steps:
       - env:
           TARGET: ${{ inputs.environment }}
