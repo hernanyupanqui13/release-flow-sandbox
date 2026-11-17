@@ -1,0 +1,64 @@
+---
+# Reusable check (mirrors the future yaperos/reusable-workflows version): the
+# pull request title, and the commit subject of single-commit pull requests,
+# must follow "type(scope): description [ABC-123]".
+name: PR Title
+
+on:
+  workflow_call:
+    inputs:
+      allowed_types:
+        description: "Allowed conventional commit types separated by |."
+        type: string
+        required: false
+        default: "feat|fix|perf|refactor|test|docs|build|ci|chore|revert"
+      ticket_pattern:
+        description: "Ticket regex inside the brackets."
+        type: string
+        required: false
+        default: "[A-Z][A-Z0-9]*-[0-9]+|NO-TICKET"
+      skip_actors:
+        description: "Comma-separated pull request authors that are not checked."
+        type: string
+        required: false
+        default: "dependabot[bot]"
+
+jobs:
+  pr_title:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Skip bots
+        id: skip
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          SKIP_ACTORS: ${{ inputs.skip_actors }}
+        run: |
+          if [[ ",${SKIP_ACTORS}," == *",${AUTHOR},"* ]]; then
+            echo "Skipping the check for ${AUTHOR}"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        if: steps.skip.outputs.skip != 'true'
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts/pr_title
+      - name: Check the title
+        if: steps.skip.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMITS: ${{ github.event.pull_request.commits }}
+          PR_TITLE_TYPES: ${{ inputs.allowed_types }}
+          PR_TITLE_TICKET: ${{ inputs.ticket_pattern }}
+        run: |
+          set -euo pipefail
+          args=("$TITLE")
+          if [[ "$COMMITS" == "1" ]]; then
+            subject="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" --jq '.[0].commit.message' | head -n 1)"
+            args+=("$subject")
+          fi
+          bash .github/scripts/pr_title/check_pr_title.sh "${args[@]}"
