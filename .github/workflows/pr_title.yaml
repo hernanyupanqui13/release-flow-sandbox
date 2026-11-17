@@ -22,31 +22,36 @@ on:
         type: string
         required: false
         default: "dependabot[bot]"
+    secrets:
+      GH_PAT:
+        required: false
 
 jobs:
+  # Mirrors load_config in reusable-workflows: it needs GH_PAT, so skipped
+  # authors are excluded here.
+  load_config:
+    if: >-
+      github.event_name == 'pull_request' &&
+      !contains(format(',{0},', inputs.skip_actors), format(',{0},', github.event.pull_request.user.login))
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          if [[ -z "$GH_PAT" ]]; then echo "GH_PAT is required"; exit 1; fi
+
   pr_title:
+    needs: [load_config]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
     steps:
-      - name: Skip bots
-        id: skip
-        env:
-          AUTHOR: ${{ github.event.pull_request.user.login }}
-          SKIP_ACTORS: ${{ inputs.skip_actors }}
-        run: |
-          if [[ ",${SKIP_ACTORS}," == *",${AUTHOR},"* ]]; then
-            echo "Skipping the check for ${AUTHOR}"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        if: steps.skip.outputs.skip != 'true'
         with:
           persist-credentials: false
           sparse-checkout: .github/scripts/pr_title
       - name: Check the title
-        if: steps.skip.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TITLE: ${{ github.event.pull_request.title }}
@@ -58,7 +63,7 @@ jobs:
           set -euo pipefail
           args=("$TITLE")
           if [[ "$COMMITS" == "1" ]]; then
-            subject="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" --jq '.[0].commit.message' | head -n 1)"
+            subject="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/commits" --jq '.[0].commit.message | split("\n")[0]')"
             args+=("$subject")
           fi
           bash .github/scripts/pr_title/check_pr_title.sh "${args[@]}"
