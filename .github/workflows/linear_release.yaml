@@ -1,0 +1,158 @@
+---
+# Sandbox copy of yaperos/reusable-workflows linear_release.yaml (PR #1452): it reads the
+# scripts from this repository instead of loading the shared configuration.
+name: Linear release
+
+# Records a deployment in a Linear Releases pipeline (scheduled type).
+#   sync:     creates or updates the release vX.Y.Z with the issues referenced by
+#             the commits since the latest stable tag, then optionally moves it
+#             to a stage (for example "stg"). Retried candidates (-rc.N) update
+#             the same release.
+#   complete: marks the release vX.Y.Z as released and optionally publishes
+#             release notes generated from the conventional commits.
+# Failures are reported but do not fail the caller unless fail_on_error is set,
+# because a Linear outage must never block or roll back a deployment.
+# fail_on_error only covers the linear_release job. If load_config fails (for
+# example, an invalid GH_PAT), the caller job fails and Linear is not updated,
+# because a reusable-workflow call job cannot use continue-on-error. Callers
+# should not make deployment jobs depend on this workflow; recover by
+# re-running it or by updating the release in Linear.
+
+on:  # yamllint disable-line rule:truthy
+  workflow_call:
+    inputs:
+      command:
+        description: "sync or complete."
+        type: string
+        required: true
+      version:
+        description: "Release version (vX.Y.Z or vX.Y.Z-rc.N); the -rc.N suffix is removed."
+        type: string
+        required: true
+      stage:
+        description: "Stage to move the release to after sync (for example stg). Empty keeps the stage."
+        type: string
+        required: false
+        default: ""
+      issue_pattern:
+        description: "Regular expression whose group 1 captures issue identifiers in commit subjects."
+        type: string
+        required: false
+        default: '\[([A-Z]+-\d+)\]'
+      release_notes:
+        description: "Publish generated release notes on complete."
+        type: boolean
+        required: false
+        default: true
+      linear_workspace:
+        description: "Optional Linear workspace slug used to link issue identifiers in the release notes."
+        type: string
+        required: false
+        default: ""
+      cliff_config:
+        description: "Optional git-cliff configuration path in the caller repository; defaults to the shared configuration."
+        type: string
+        required: false
+        default: ""
+      dry_run:
+        description: "Scan commits and call read-only Linear APIs without creating or modifying releases."
+        type: boolean
+        required: false
+        default: false
+      fail_on_error:
+        description: "Fail the caller when Linear cannot be updated. A load_config failure always fails the caller."
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      LINEAR_ACCESS_KEY:
+        description: "Access key of the Linear release pipeline (not a personal API key)."
+        required: true
+
+jobs:
+  linear_release:
+    runs-on: ubuntu-24.04
+    continue-on-error: ${{ !inputs.fail_on_error }}
+    permissions:
+      contents: read
+    steps:
+      - name: Validate inputs
+        id: release
+        env:
+          COMMAND: ${{ inputs.command }}
+          VERSION_INPUT: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "$COMMAND" != "sync" && "$COMMAND" != "complete" ]]; then
+            echo "command must be sync or complete, got '$COMMAND'"; exit 1
+          fi
+          if ! [[ "$VERSION_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "Invalid release version '$VERSION_INPUT'"; exit 1
+          fi
+          version="${VERSION_INPUT%-rc.*}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Resolve the scan base
+        id: base
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The final tag may already exist when this runs after the prd release,
+          # so the base is the latest stable tag other than this version.
+          base="$(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$VERSION" | head -n 1 || true)"
+          echo "base_ref=${base}" >> "$GITHUB_OUTPUT"
+          echo "Release ${VERSION}, scanning since ${base:-the first commit}"
+      - name: Generate release notes
+        id: notes
+        if: inputs.command == 'complete' && inputs.release_notes
+        env:
+          BASE_REF: ${{ steps.base.outputs.base_ref }}
+          CLIFF_CONFIG_INPUT: ${{ inputs.cliff_config }}
+          LINEAR_WORKSPACE: ${{ inputs.linear_workspace }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bash ./.github/scripts/release_version/install_git_cliff.sh
+          export PATH="${RUNNER_TEMP}/git-cliff-2.14.2:${PATH}"
+          if [[ -n "$CLIFF_CONFIG_INPUT" ]]; then
+            export CLIFF_CONFIG="${GITHUB_WORKSPACE}/${CLIFF_CONFIG_INPUT}"
+          fi
+          notes="${RUNNER_TEMP}/release-notes.md"
+          bash ./.github/scripts/release_version/release_notes.sh "$BASE_REF" "$notes"
+          echo "path=${notes}" >> "$GITHUB_OUTPUT"
+          { echo "### Release notes"; cat "$notes"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Sync the release
+        if: inputs.command == 'sync'
+        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: sync
+          version: ${{ steps.release.outputs.version }}
+          name: ${{ steps.release.outputs.version }}
+          base_ref: ${{ steps.base.outputs.base_ref }}
+          issue_pattern: ${{ inputs.issue_pattern }}
+          dry_run: ${{ inputs.dry_run }}
+      - name: Move the release to the stage
+        if: inputs.command == 'sync' && inputs.stage != ''
+        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: update
+          stage: ${{ inputs.stage }}
+          version: ${{ steps.release.outputs.version }}
+          dry_run: ${{ inputs.dry_run }}
+      - name: Complete the release
+        if: inputs.command == 'complete'
+        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
+        with:
+          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
+          command: complete
+          version: ${{ steps.release.outputs.version }}
+          release_notes: ${{ steps.notes.outputs.path }}
+          dry_run: ${{ inputs.dry_run }}

@@ -1,5 +1,5 @@
-# git-cliff configuration used by the Release Flow to compute the next version.
-# Sandbox copy of the release versioning configuration.
+# Default git-cliff configuration for release_version.sh and release_notes.sh.
+# Callers can pass their own file through the cliff_config workflow input.
 
 [git]
 conventional_commits = true
@@ -7,6 +7,8 @@ conventional_commits = true
 filter_unconventional = false
 # Only stable tags (released to prd) are the bump base; -rc.N tags are ignored.
 tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+# Commits outside the user-facing groups stay in "internal": they still count
+# for the version bump but are hidden from the release notes.
 commit_parsers = [
   { field = "breaking", pattern = "true", group = "<!-- 0 -->Cambios importantes" },
   { message = "^feat", group = "<!-- 1 -->Nuevas funcionalidades" },
@@ -22,9 +24,6 @@ features_always_bump_minor = true
 # reaching v1.0.0 is a deliberate decision made through the manual override.
 breaking_always_bump_major = false
 
-# Release notes sent to Linear when a release is completed in prd.
-# Internal commits stay in the "internal" group (so they still count for the
-# version bump) and are hidden by the template.
 [changelog]
 trim = true
 body = """
@@ -37,8 +36,3 @@ body = """
 {% endif %}\
 {% endfor %}
 """
-postprocessors = [
-  { pattern = '\[([A-Z]+-[0-9]+)\]', replace = "([$1](https://linear.app/hernanyupanqui/issue/$1))" },
-  { pattern = '\(#([0-9]+)\)', replace = "([#$1](https://github.com/hernanyupanqui13/release-flow-sandbox/pull/$1))" },
-]
-

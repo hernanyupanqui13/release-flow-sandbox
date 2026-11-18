@@ -1,6 +1,7 @@
 ---
-# Sandbox copy of the Release Flow: the same job order with stub reusable
-# workflows that only create tags and GitHub Releases. Nothing is deployed.
+# Sandbox copy of the ms-ml-genai-agents-bs Release Flow (PR #536): the same
+# job order with stub reusable workflows that only create tags and GitHub
+# Releases. Nothing is deployed. Run it from main.
 name: Release Flow
 
 on:
@@ -16,7 +17,7 @@ on:
         default: none
         options: [none, stg_deploy, prd_deploy]
 
-run-name: Release Flow (simulate_failure=${{ inputs.simulate_failure }})
+run-name: Release Flow on ${{ github.ref_name }}${{ inputs.releaseCandidateVersion && format(' at version {0}', inputs.releaseCandidateVersion) || '' }} (simulate_failure=${{ inputs.simulate_failure }})
 
 permissions:
   contents: write
@@ -26,26 +27,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  compute_version:
+  # Fails fast with a clear message instead of failing later in deploy_stg.
+  check_branch:
     runs-on: ubuntu-24.04
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    permissions: {}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "22"
-      - id: version
+      - name: Require main or a release branch
         env:
-          GIT_CLIFF: npx --yes git-cliff@2.14.2
-          OVERRIDE: ${{ inputs.releaseCandidateVersion }}
+          REF: ${{ github.ref }}
         run: |
-          version="$(bash .github/scripts/release-version.sh "$OVERRIDE")"
-          echo "### Release version: \`${version}\`" >> "$GITHUB_STEP_SUMMARY"
+          case "$REF" in
+            refs/heads/main | refs/heads/release/*)
+              echo "Releasing from ${REF#refs/heads/}" ;;
+            *)
+              echo "::error title=Invalid release branch::Run the Release Flow from main or a release/** branch, not ${REF}."
+              exit 1 ;;
+          esac
+
+  compute_version:
+    needs: [check_branch]
+    uses: ./.github/workflows/get_next_release_version.yaml
+    with:
+      version_override: ${{ inputs.releaseCandidateVersion }}
+      release_notes_preview: true
+      linear_workspace: hernanyupanqui
 
   validate_release:
     needs: [compute_version]
@@ -95,85 +100,24 @@ jobs:
       environment: prd
       releaseCandidateVersion: ${{ needs.compute_version.outputs.version }}
 
-  # Linear Releases (scheduled pipeline). The release is named vX.Y.Z without
-  # -rc.N so retried candidates update the same release, and every sync scans
-  # from the latest stable tag so a version change keeps earlier commits.
-  # Linear failures never block the deploy.
+  # Linear Releases: the release is named vX.Y.Z without -rc.N, so retried
+  # candidates update the same release. Linear failures never block the deploy.
   linear_stg:
-    needs: [compute_version, deploy_stg]
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - id: release
-        env:
-          RC: ${{ needs.compute_version.outputs.version }}
-        run: |
-          set -euo pipefail
-          echo "version=${RC%%-rc.*}" >> "$GITHUB_OUTPUT"
-          echo "base=$(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1)" >> "$GITHUB_OUTPUT"
-      - name: Sync issues into the release
-        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
-        with:
-          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
-          version: ${{ steps.release.outputs.version }}
-          name: ${{ steps.release.outputs.version }}
-          base_ref: ${{ steps.release.outputs.base }}
-          # Commit subjects reference issues as "[ABC-123]".
-          issue_pattern: '\[([A-Z]+-\d+)\]'
-      - name: Move the release to the stg stage
-        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
-        with:
-          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
-          command: update
-          stage: stg
-          version: ${{ steps.release.outputs.version }}
+    needs: [deploy_stg, compute_version]
+    uses: ./.github/workflows/linear_release.yaml
+    with:
+      command: sync
+      version: ${{ needs.compute_version.outputs.version }}
+      stage: stg
+    secrets:
+      LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}
 
   linear_prd:
-    needs: [compute_version, deploy_prd]
-    runs-on: ubuntu-24.04
-    continue-on-error: true
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "22"
-      - id: release
-        env:
-          RC: ${{ needs.compute_version.outputs.version }}
-        run: |
-          set -euo pipefail
-          version="${RC%%-rc.*}"
-          # generate_release may already have pushed the final tag, so exclude it.
-          previous="$(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -vx "$version" | head -n 1)"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "previous=$previous" >> "$GITHUB_OUTPUT"
-      - name: Generate release notes
-        env:
-          PREVIOUS: ${{ steps.release.outputs.previous }}
-        run: |
-          set -euo pipefail
-          npx --yes git-cliff@2.14.2 --config cliff.toml "${PREVIOUS}..HEAD" --strip all > release-notes.md
-          if ! grep -q '[^[:space:]]' release-notes.md; then
-            echo "Sin cambios visibles para usuarios en esta versión." > release-notes.md
-          fi
-          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
-      - name: Complete the release
-        uses: linear/linear-release-action@dd4fc407f860b9460d2cf0b3fb1edd8985cf443f # v0.18.2
-        with:
-          access_key: ${{ secrets.LINEAR_ACCESS_KEY }}
-          command: complete
-          version: ${{ steps.release.outputs.version }}
-          release_notes: release-notes.md
+    needs: [deploy_prd, compute_version]
+    uses: ./.github/workflows/linear_release.yaml
+    with:
+      command: complete
+      version: ${{ needs.compute_version.outputs.version }}
+      linear_workspace: hernanyupanqui
+    secrets:
+      LINEAR_ACCESS_KEY: ${{ secrets.LINEAR_ACCESS_KEY }}

@@ -11,9 +11,19 @@
 #
 # Environment:
 #   GIT_CLIFF     git-cliff command (default: git-cliff).
-#   CLIFF_CONFIG  git-cliff configuration (default: <repo root>/cliff.toml).
+#   CLIFF_CONFIG  git-cliff configuration (default: cliff.toml next to this script).
+#
+# Run it from the root of the repository being released. Stable tags must use
+# the vX.Y.Z format.
+#
+# Scope: linear releases from a single branch. git-cliff bumps from the most
+# recent stable tag in the history, so a maintenance tag of an older line merged
+# after a newer release would yield a lower version; the script fails instead.
 #   GITHUB_OUTPUT When set, the version is also written as the "version" output.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
 
 readonly STABLE_VERSION_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+$'
 readonly RC_VERSION_REGEX='^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$'
@@ -36,6 +46,21 @@ emit() {
 
 latest_stable_tag() {
 	git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E "$STABLE_VERSION_REGEX" | head -n 1 || true
+}
+
+# Succeeds when stable version $1 is greater than stable version $2.
+version_gt() {
+	local -a left right
+	local i
+	IFS=. read -r -a left <<<"${1#v}"
+	IFS=. read -r -a right <<<"${2#v}"
+	for i in 0 1 2; do
+		if ((10#${left[i]} != 10#${right[i]})); then
+			((10#${left[i]} > 10#${right[i]}))
+			return
+		fi
+	done
+	return 1
 }
 
 next_rc_number() {
@@ -72,11 +97,13 @@ main() {
 
 	local -a git_cliff
 	read -r -a git_cliff <<<"${GIT_CLIFF:-git-cliff}"
-	base="$("${git_cliff[@]}" --repository "$repo_root" --config "${CLIFF_CONFIG:-$repo_root/cliff.toml}" --bumped-version)" ||
+	base="$("${git_cliff[@]}" --repository "$repo_root" --config "${CLIFF_CONFIG:-$SCRIPT_DIR/cliff.toml}" --bumped-version)" ||
 		fail "git-cliff failed to compute the bumped version"
 
 	[[ "$base" =~ $STABLE_VERSION_REGEX ]] || fail "git-cliff returned an unexpected version '$base'"
 	[[ "$base" != "$stable" ]] || fail "git-cliff did not bump $stable"
+	version_gt "$base" "$stable" ||
+		fail "git-cliff returned $base, which is not greater than the latest stable tag $stable; only linear releases are supported"
 	if tag_exists "$base"; then
 		fail "stable tag $base already exists but is not reachable from HEAD"
 	fi

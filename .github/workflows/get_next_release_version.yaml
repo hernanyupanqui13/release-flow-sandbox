@@ -1,0 +1,95 @@
+---
+# Sandbox copy of yaperos/reusable-workflows get_next_release_version.yaml (PR #1452): it reads the
+# scripts from this repository instead of loading the shared configuration.
+name: Get next release version
+
+# Computes the next release candidate version (vX.Y.Z-rc.N) from the
+# conventional commits since the latest stable vX.Y.Z tag reachable from the
+# checked-out commit. A candidate that is retried keeps its version and only
+# increases N, unless the new commits raise the bump level. Nothing is written:
+# tags and branches stay owned by the release workflows. Only linear releases
+# from a single branch are supported: the job fails if the computed version is
+# not greater than the latest stable tag (for example, after merging a
+# maintenance tag of an older line).
+
+on:  # yamllint disable-line rule:truthy
+  workflow_call:
+    inputs:
+      version_override:
+        description: "Optional explicit version (vX.Y.Z-rc.N); it is validated and returned as is."
+        type: string
+        required: false
+        default: ""
+      cliff_config:
+        description: "Optional git-cliff configuration path in the caller repository; defaults to the shared configuration."
+        type: string
+        required: false
+        default: ""
+      release_notes_preview:
+        description: "Also write the release notes since the latest stable tag to the job summary."
+        type: boolean
+        required: false
+        default: false
+      linear_workspace:
+        description: "Optional Linear workspace slug used to link issue identifiers in the preview."
+        type: string
+        required: false
+        default: ""
+    outputs:
+      version:
+        description: "Next release candidate version (vX.Y.Z-rc.N)."
+        value: ${{ jobs.next_version.outputs.version }}
+      last_stable_version:
+        description: "Latest stable version (vX.Y.Z) used as the bump base."
+        value: ${{ jobs.next_version.outputs.last_stable_version }}
+
+jobs:
+  next_version:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      last_stable_version: ${{ steps.version.outputs.last_stable_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Install git-cliff
+        run: bash ./.github/scripts/release_version/install_git_cliff.sh
+      - name: Compute the next version
+        id: version
+        env:
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+          CLIFF_CONFIG_INPUT: ${{ inputs.cliff_config }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CLIFF_CONFIG_INPUT" ]]; then
+            export CLIFF_CONFIG="${GITHUB_WORKSPACE}/${CLIFF_CONFIG_INPUT}"
+          fi
+          bash ./.github/scripts/release_version/release_version.sh "$VERSION_OVERRIDE" >/dev/null
+          version="$(sed -n 's/^version=//p' "$GITHUB_OUTPUT" | tail -n 1)"
+          last_stable="$(git tag --merged HEAD --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+          echo "last_stable_version=${last_stable}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release version: \`${version}\`"
+            echo "Latest stable version: \`${last_stable:-none}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Release notes preview
+        if: inputs.release_notes_preview
+        env:
+          BASE_REF: ${{ steps.version.outputs.last_stable_version }}
+          CLIFF_CONFIG_INPUT: ${{ inputs.cliff_config }}
+          LINEAR_WORKSPACE: ${{ inputs.linear_workspace }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CLIFF_CONFIG_INPUT" ]]; then
+            export CLIFF_CONFIG="${GITHUB_WORKSPACE}/${CLIFF_CONFIG_INPUT}"
+          fi
+          notes="${RUNNER_TEMP}/release-notes.md"
+          bash ./.github/scripts/release_version/release_notes.sh "$BASE_REF" "$notes"
+          { echo "### Release notes preview"; cat "$notes"; } >> "$GITHUB_STEP_SUMMARY"
