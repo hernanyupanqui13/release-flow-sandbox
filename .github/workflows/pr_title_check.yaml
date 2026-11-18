@@ -18,5 +18,3 @@ jobs:
     uses: ./.github/workflows/pr_title.yaml
     with:
       skip_actors: ${{ vars.PR_TITLE_SKIP_ACTORS || 'dependabot[bot]' }}
-    secrets:
-      GH_PAT: ${{ secrets.GH_PAT }}

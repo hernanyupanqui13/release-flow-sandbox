@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Scenario tests for release-version.sh. Each case builds a throwaway git
+# Scenario tests for release_version.sh. Each case builds a throwaway git
 # repository, so the tests never read or write the real repository tags.
 #
 # Environment:
@@ -7,8 +7,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="$SCRIPT_DIR/release-version.sh"
-CLIFF_CONFIG="$(cd "$SCRIPT_DIR/../.." && pwd)/cliff.toml"
+SCRIPT="$SCRIPT_DIR/release_version.sh"
+CLIFF_CONFIG="$SCRIPT_DIR/cliff.toml"
 readonly SCRIPT_DIR SCRIPT CLIFF_CONFIG
 
 # Isolate the throwaway repositories from user and system git configuration.
@@ -115,6 +115,20 @@ expect_version "rc numbers are compared numerically" v0.9.10-rc.11
 new_repo
 commit "fix: no release yet"
 expect_failure "missing stable tag fails"
+
+new_repo
+tag v0.9.0
+commit "feat!: new major line"
+tag v1.0.0
+commit "fix: after v1"
+# Explicit dates make the maintenance tag the most recent one in the history.
+git checkout -q -b maintenance v0.9.0
+GIT_COMMITTER_DATE="2030-01-01T00:00:00Z" commit "fix: maintenance of the old line"
+tag v0.9.1
+git checkout -q -
+GIT_COMMITTER_DATE="2030-01-02T00:00:00Z" git merge -q --no-ff --no-edit maintenance
+GIT_COMMITTER_DATE="2030-01-03T00:00:00Z" commit "fix: next"
+expect_failure "maintenance tag of an older line merged later fails instead of going backwards"
 
 new_repo
 tag v0.9.9
